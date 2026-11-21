@@ -200,6 +200,20 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(self.live.speak("an approved passage", "en-IN"), clip)
         self.assertEqual(self.live._rest.call_count, 4)
 
+    def test_verifier_rejects_malformed_or_incomplete_decisions_and_caches_them(self):
+        self.live._rest.side_effect = None
+        for i, (reason, content, expected) in enumerate([
+            ("stop", '{"supported":true}', True),
+            ("length", '{"supported":true}', False),
+            ("stop", 'possibly', False),
+            ("stop", '{"supported":false}', False),
+        ]):
+            self.live._rest.return_value = {"choices": [{"finish_reason": reason, "message": {"content": content}}]}
+            args = ("गुरुः", "Sanskrit", f"Teacher {i}", "English")
+            self.assertIs(self.live.supports_translation(*args), expected)
+            self.assertIs(self.live.supports_translation(*args), expected)
+        self.assertEqual(self.live._rest.call_count, 4)
+
     def test_validation_runs_before_submission(self):
         for action in [
             lambda: self.live.translate("ए" * 2001, "en-IN"),

@@ -13,9 +13,30 @@ PRACTICE_TITLE = "The river at dawn"
 PHOTO_TITLE = "Manuscript bundle photograph"
 
 
+PRACTICE_LINES = (
+    (
+        "प्रभाते नदी शान्ता भवति।",
+        [0.08889, 0.24516, 0.64861, 0.43387],
+        "The river is calm at dawn.",
+        "भोर में नदी शांत होती है।",
+    ),
+    (
+        "तीरे पक्षिणो गायन्ति।",
+        [0.08889, 0.50484, 0.56875, 0.70000],
+        "Birds sing on the riverbank.",
+        "नदी के किनारे पक्षी गाते हैं।",
+    ),
+)
+
+
 def seed(library):
     """Add the local examples when the library is empty. Leave all readings in draft."""
     if library.leaves():
+        for entry in library.leaves():
+            if (entry["kind"] == "Practice sheet" and entry["filename"] == "river-at-dawn.png"
+                    and library.leaf(entry["id"])["original"] == (ASSETS / "river-at-dawn.png").read_bytes()):
+                for source, _, english, hindi in PRACTICE_LINES:
+                    library.mark_reference(entry["id"], source, english, hindi)
         return
 
     # Read both assets first so a missing file cannot leave a partial set of examples.
@@ -48,21 +69,7 @@ def seed(library):
     )
     # Reading boxes contain the printed line and a small margin on each side.
     # Coordinates are fractions of the full image in [left, top, right, bottom] order.
-    practice_lines = (
-        (
-            "प्रभाते नदी शान्ता भवति।",
-            [0.08889, 0.24516, 0.64861, 0.43387],
-            "The river is calm at dawn.",
-            "भोर में नदी शांत होती है।",
-        ),
-        (
-            "तीरे पक्षिणो गायन्ति।",
-            [0.08889, 0.50484, 0.56875, 0.70000],
-            "Birds sing on the riverbank.",
-            "नदी के किनारे पक्षी गाते हैं।",
-        ),
-    )
-    for source, bbox, english, hindi in practice_lines:
+    for source, bbox, english, hindi in PRACTICE_LINES:
         library.add_passage(
             specimen_id,
             source=source,
@@ -71,3 +78,4 @@ def seed(library):
             english=english,
             hindi=hindi,
         )
+        library.mark_reference(specimen_id, source, english, hindi)

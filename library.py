@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 
+from quality import LANGUAGES, plausible
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS leaves (
@@ -86,6 +88,15 @@ def _record(row):
     record["bbox"] = json.loads(record["bbox"]) if record["bbox"] else None
     for field in ("source", "english", "hindi"):
         record[field + "_approved"] = bool(record[field + "_reviewer"])
+    for field in ("english", "hindi"):
+        text = record[field]
+        approved = record["source_approved"] and record[field + "_approved"]
+        origin = record[field + "_origin"]
+        usable = plausible(record["normalized"] or record["source"], text, field.title())
+        record[field + "_approved"] = bool(approved and usable)
+        record[field + "_visible"] = usable and (approved or origin in {"checked", "reference"})
+        if not usable or (origin == "legacy" and not approved):
+            record[field] = ""
     return record
 
 
@@ -98,6 +109,12 @@ class Library:
         self.lock = RLock()
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+
+        with self._write():
+            columns = {row["name"] for row in self.db.execute("PRAGMA table_info(passages)")}
+            for field in ("english", "hindi"):
+                if field + "_origin" not in columns:
+                    self.db.execute(f"ALTER TABLE passages ADD COLUMN {field}_origin TEXT NOT NULL DEFAULT 'legacy'")
 
     def close(self):
         with self.lock:
@@ -147,7 +164,7 @@ class Library:
             if old["language"] != language or old["script"] != script:
                 self.db.execute(
                     """UPDATE passages SET source_version=source_version+1,source_reviewer='',
-                       english_reviewer='',hindi_reviewer='' WHERE leaf_id=?""", (leaf_id,))
+                       english_reviewer='',hindi_reviewer='',english_origin='legacy',hindi_origin='legacy' WHERE leaf_id=?""", (leaf_id,))
 
     def flag_leaf(self, leaf_id, note):
         with self._write():
@@ -156,7 +173,8 @@ class Library:
                 raise ValueError("Leaf not found.")
             if note.strip():
                 self.db.execute(
-                    """UPDATE passages SET source_reviewer='',english_reviewer='',hindi_reviewer=''
+                    """UPDATE passages SET source_version=source_version+1,source_reviewer='',english_reviewer='',hindi_reviewer='',
+                       english_origin='legacy', hindi_origin='legacy'
                        WHERE leaf_id=?""", (leaf_id,))
 
     def passages(self, leaf_id):
@@ -175,20 +193,20 @@ class Library:
 
     def _insert(self, leaf_id, source, bbox, english, hindi, raw_ocr, normalized, import_key=None):
         return self.db.execute(
-            """INSERT INTO passages(leaf_id,position,source,bbox,english,hindi,raw_ocr,normalized,import_key)
-               VALUES (?,(SELECT COALESCE(MAX(position)+1,0) FROM passages WHERE leaf_id=?),?,?,?,?,?,?,?)""",
+            """INSERT INTO passages(leaf_id,position,source,bbox,english,hindi,raw_ocr,normalized,import_key,english_origin,hindi_origin)
+               VALUES (?,(SELECT COALESCE(MAX(position)+1,0) FROM passages WHERE leaf_id=?),?,?,?,?,?,?,?,'manual','manual')""",
             (leaf_id, leaf_id, source, _box(bbox), english, hindi, raw_ocr, normalized, import_key)).lastrowid
 
     def add_passage(self, leaf_id, source='', bbox=None, english='', hindi='', raw_ocr='', normalized=''):
         with self._write():
             return self._insert(leaf_id, source, bbox, english, hindi, raw_ocr, normalized)
 
-    def save_local_draft(self, leaf_id, source, english, hindi):
+    def mark_reference(self, leaf_id, source, english, hindi):
         with self._write():
-            if self.db.execute("SELECT 1 FROM passages WHERE leaf_id=?", (leaf_id,)).fetchone():
-                return
-            pid = self._insert(leaf_id, source, None, english, hindi, source, "", "local-vision")
-            self.db.execute("UPDATE passages SET note=? WHERE id=?", ("Draft from local Qwen2.5-VL.", pid))
+            self.db.execute(
+                """UPDATE passages SET english_origin='reference', hindi_origin='reference'
+                   WHERE leaf_id=? AND source_version=1 AND source=? AND normalized=?
+                   AND english=? AND hindi=?""", (leaf_id, source, source, english, hindi))
 
     def ingest(self, leaf_id, blocks):
         """Return the number of new OCR blocks. Replaying a result preserves human edits."""
@@ -219,7 +237,7 @@ class Library:
                 return
             self.db.execute(
                 """UPDATE passages SET source=?,normalized=?,bbox=?,source_version=source_version+1,
-                   source_reviewer='',english_reviewer='',hindi_reviewer='' WHERE id=?""",
+                   source_reviewer='',english_reviewer='',hindi_reviewer='',english_origin='legacy',hindi_origin='legacy' WHERE id=?""",
                 (source, normalized, box, passage_id))
 
     def approve_source(self, passage_id, reviewer):
@@ -233,15 +251,18 @@ class Library:
                 raise ValueError("Keep each [gap] marker in the normalized Sanskrit.")
             self.db.execute("UPDATE passages SET source_reviewer=? WHERE id=?", (reviewer, passage_id))
 
-    def save_translation(self, passage_id, lang, text, *, source_version=None):
+    def save_translation(self, passage_id, lang, text, *, source_version=None, checked=False):
         field = _language(lang)
         with self._write():
             old = self._passage(passage_id)
             if source_version is not None and old["source_version"] != source_version:
                 raise ValueError("The reading changed during translation. Review the current Sanskrit.")
-            if old[field] != text:
+            if checked and (old["flag"] or source_version is None or _record(old)[field + "_approved"]):
+                raise ValueError("Review the current passage before replacing its translation.")
+            origin = "checked" if checked else "manual"
+            if old[field] != text or old[field + "_origin"] == "legacy" or (checked and old[field + "_origin"] != origin):
                 self.db.execute(
-                    f"UPDATE passages SET {field}=?,{field}_reviewer='' WHERE id=?", (text, passage_id))
+                    f"UPDATE passages SET {field}=?,{field}_reviewer='',{field}_origin=? WHERE id=?", (text, origin, passage_id))
 
     def approve_translation(self, passage_id, lang, reviewer):
         field = _language(lang)
@@ -253,6 +274,8 @@ class Library:
             _require_text(row[field], "Enter the translation before approval.")
             if row[field].count("[gap]") != row["source"].count("[gap]"):
                 raise ValueError("Keep each [gap] marker in the translation.")
+            if not _record(row)[field]:
+                raise ValueError("Enter a translation in the target language and check it against the source.")
             self.db.execute(f"UPDATE passages SET {field}_reviewer=? WHERE id=?", (reviewer, passage_id))
 
     def move_passage(self, passage_id, direction):
@@ -304,6 +327,8 @@ def _edition(leaf, passages):
         scheme = ""
     if scheme in ("http", "https"):
         metadata += f' · <a href="{escape(link, quote=True)}">Collection record</a>'
+    source_label = escape(leaf["language"])
+    source_code = LANGUAGES.get(leaf["language"], "und").split("-")[0]
     blocks = []
     for row in passages:
         pid = int(row["id"])
@@ -311,15 +336,15 @@ def _edition(leaf, passages):
         view = f"{left*width:g} {top*height:g} {(right-left)*width:g} {(bottom-top)*height:g}"
         normalized = ""
         if row["normalized"] and row["normalized"] != row["source"]:
-            normalized = f'<h3>Normalized Sanskrit</h3><p lang="sa">{escape(row["normalized"])}</p>'
+            normalized = f'<h3>Normalized {source_label}</h3><p lang="{source_code}">{escape(row["normalized"])}</p>'
         blocks.append(f'''<section id="passage-{pid}"><h2>Passage {len(blocks) + 1}</h2>
         <figure id="region-{pid}"><svg viewBox="{view}" role="img" aria-label="Source image region">
         <use href="#leaf-image"/></svg></figure>
-        <h3>Sanskrit</h3><p lang="sa">{escape(row["source"])}</p>{normalized}
+        <h3>{source_label}</h3><p lang="{source_code}">{escape(row["source"])}</p>{normalized}
         <h3>English</h3><p lang="en">{escape(row["english"])}</p>
         <h3>Hindi</h3><p lang="hi">{escape(row["hindi"])}</p>
         <a href="#region-{pid}">View source region</a>
-        <p class="credits">Sanskrit review · {escape(row["source_reviewer"])}<br>
+        <p class="credits">{source_label} review · {escape(row["source_reviewer"])}<br>
         English review · {escape(row["english_reviewer"])}<br>Hindi review · {escape(row["hindi_reviewer"])}</p>
         </section>''')
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">

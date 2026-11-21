@@ -53,7 +53,19 @@ For a historical test, choose one permitted leaf image from the British Library 
 ## Image translation demo
 
 Open **Translate**. Choose the language, then paste, drop, or upload a single image.
-Select **Translate into English and Hindi**. Both translations are machine drafts.
+Use **Manuscript** for a handwritten leaf. Select **Translate into English and Hindi** to read the image.
+Open **Review passages** and compare the transcription with the leaf. Mark unreadable words with `[gap]`.
+Approve the source before generating manuscript translations.
+
+Use **Printed text** for clear typeset material. Automatic translation requires two matching readings of the source.
+If the app cannot check the reading, it asks for review. The local model can make both readings.
+
+The app checks each proposed translation against the source in a separate model request.
+Sarvam mode uses Sarvam-105B for this check. Live checks use credits under the local spending limit.
+The app withholds a translation when a check fails. English and Hindi have separate results.
+A machine-checked draft can still contain errors. Reader and export require human approval.
+Earlier machine drafts without a recorded check stay hidden until a new check succeeds.
 For a session-only Sarvam connection, use **Connect Sarvam** after confirming free credits and disabled auto-recharge.
 When Sarvam is disconnected, the app can use an installed Ollama model named `qwen2.5vl:7b` on this Mac.
+If available, the app uses the local text model `qwen2.5:7b` for translation.
 The app checks the local Ollama server on port 11434. The saved example also works without a model.

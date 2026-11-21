@@ -61,6 +61,9 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue(self.passage()["source_approved"])
         self.lib.update_leaf(self.leaf, "New title", "Catalogue", "Sanskrit", "Ranjana", "")
         self.assertFalse(self.passage()["source_approved"])
+        self.assertEqual(self.passage()["english"], "")
+        self.lib.save_translation(self.pid, "en", "The god.")
+        self.lib.save_translation(self.pid, "hi", "देवता।")
         self.approve()
         self.lib.flag_leaf(self.leaf, "Text behind cord")
         with self.assertRaises(ValueError):

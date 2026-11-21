@@ -83,19 +83,47 @@ class ReaderTest(unittest.TestCase):
         self.assertTrue(self.button("Run or check OCR").disabled)
         self.assertEqual([], self.library.passages(photo["id"]))
 
-    def test_unreviewed_image_can_produce_both_machine_drafts(self):
+    def test_manuscript_ocr_needs_approval_before_either_translation(self):
         from translate_screen import run_pipeline
         original = (ROOT / "assets" / "river-at-dawn.png").read_bytes()
         lid = self.library.add_leaf("New image", original, "source.png", language="Sanskrit")
         provider = Mock()
         provider.ocr.return_value = [{"text": "बालकः पुस्तकं पठति।", "bbox": None}]
         provider.translate.side_effect = ["The boy reads a book.", "लड़का एक पुस्तक पढ़ता है।"]
+        with self.assertRaisesRegex(ValueError, "Check the manuscript"):
+            run_pipeline(self.library, provider, self.library.leaf(lid), lambda _: None)
+        provider.translate.assert_not_called()
+        row, = self.library.passages(lid)
+        self.assertFalse(row["english_visible"] or row["hindi_visible"])
+        self.library.approve_source(row["id"], "Reviewer")
+        provider.supports_translation.return_value = True
         run_pipeline(self.library, provider, self.library.leaf(lid), lambda _: None)
         run_pipeline(self.library, provider, self.library.leaf(lid), lambda _: None)
         self.assertEqual(2, provider.translate.call_count)
         row, = self.library.passages(lid)
         self.assertEqual("The boy reads a book.", row["english"])
-        self.assertFalse(row["english_approved"] or row["source_approved"])
+        self.assertTrue(row["english_visible"] and row["hindi_visible"])
+        self.assertFalse(row["english_approved"])
+
+    def test_old_unverified_translations_hidden_in_all_workspaces(self):
+        original = (ROOT / "assets" / "manuscript-bundle.jpeg").read_bytes()
+        self.app.file_uploader[0].upload("old-leaf.jpeg", original, "image/jpeg")
+        self.app.run()
+        lid = self.library.leaves()[0]["id"]
+        pid = self.library.add_passage(lid, "श्री")
+        guess = "The sage was born in a royal dynasty."
+        with self.library.db:
+            self.library.db.execute("UPDATE passages SET english=?, english_origin='legacy' WHERE id=?", (guess, pid))
+        self.app.run()
+        self.assertTrue(any("English withheld" in elt.value for elt in self.app.caption))
+        self.assertNotIn(guess, [elt.value for elt in self.app.text])
+        self.button("Review passages").click().run()
+        self.assert_healthy()
+        self.assertNotIn(guess, [elt.value for elt in self.app.text_area])
+        self.choose_page("Reader")
+        self.assertFalse(any(guess in elt.value for elt in self.app.markdown))
+        with self.assertRaises(ValueError):
+            self.library.export_html(lid)
 
     def test_import_and_flag_original_photo(self):
         original = (ROOT / "assets" / "manuscript-bundle.jpeg").read_bytes()

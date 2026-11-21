@@ -12,6 +12,8 @@ import re
 import sqlite3
 import wave
 
+from quality import CHECK_PROMPT, supported
+
 API = "https://api.sarvam.ai"
 TARGETS = {"en-IN", "hi-IN"}
 NO_RETRIES = {"max_retries": 0, "timeout_in_seconds": 45}
@@ -328,6 +330,21 @@ class LiveService:
             suffix = part[len(part.rstrip()):]
             parts.append(prefix + draft + suffix)
         return "".join(parts)
+
+    def supports_translation(self, source, language, draft, target):
+        def submit():
+            result = self._rest("POST", "/v2/chat/completions", json={
+                "model": "sarvam-105b", "reasoning_effort": "low", "max_tokens": 512,
+                "messages": [{"role": "system", "content": CHECK_PROMPT},
+                             {"role": "user", "content": json.dumps({
+                                 "source": source, "language": language, "translation": draft,
+                                 "target": target}, ensure_ascii=False)}]})
+            choices = result.get("choices") or []
+            if not choices or choices[0].get("finish_reason") != "stop":
+                return "false"
+            return "true" if supported(choices[0]["message"].get("content")) else "false"
+        verdict = self._once("translation-check-v1", [language, source, target, draft], 100, submit)
+        return verdict == "true"
 
     def dictate(self, audio_bytes, filename):
         try:

@@ -9,6 +9,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, UnidentifiedImageError
 import streamlit as st
 
+import local_demo
+from quality import LANGUAGES, Withheld, checked_translation
 from library import Library
 from samples import GRANTHA_URL, seed
 from sarvam_live import LiveService
@@ -235,10 +237,11 @@ def selected_passage(passages, leaf_id):
 
 def source_editor(library, passage, leaf, reviewer):
     passage_id = passage["id"]
+    source_label = leaf["language"] if leaf["language"] != "Unknown" else "source"
     with st.container(key="source_editor"):
         top, status = st.columns([1, 1], vertical_alignment="center")
         with top:
-            st.markdown("### Sanskrit")
+            st.markdown(f"### {leaf['language']}")
         with status:
             if passage["source_approved"] and not leaf["flag"]:
                 badge("Approved", "good")
@@ -246,8 +249,8 @@ def source_editor(library, passage, leaf, reviewer):
                 badge("Needs review")
         with st.form(f"source_{passage_id}"):
             source = st.text_area("Transcription", value=passage["source"], height=112)
-            with st.expander("Devanagari reading and image location"):
-                normalized = st.text_area("Devanagari reading for translation",
+            with st.expander("Reading for translation and image location"):
+                normalized = st.text_area("Devanagari reading for translation" if source_label == "Sanskrit" else "Reading for translation",
                                           value=passage["normalized"], height=96)
                 st.caption("Enter [gap] for unreadable text. Use the same gaps in the Devanagari reading.")
                 has_region = st.checkbox("Use an image region", value=bool(passage["bbox"]))
@@ -263,20 +266,20 @@ def source_editor(library, passage, leaf, reviewer):
                     st.caption("Original OCR")
                     show_text(passage["raw_ocr"], "sa")
             save, approve = st.columns(2)
-            saved = save.form_submit_button("Save Sanskrit", width="stretch")
+            saved = save.form_submit_button(f"Save {source_label}", width="stretch")
             approved = approve.form_submit_button(
-                "Approve Sanskrit", type="primary", width="stretch",
+                f"Approve {source_label}", type="primary", width="stretch",
                 disabled=not reviewer.strip() or bool(leaf["flag"]),
             )
         if saved or approved:
             try:
-                if source != passage["source"] and normalized == passage["source"] == passage["normalized"]:
+                if source != passage["source"] and normalized == passage["normalized"]:
                     normalized = ""
                 region = position if box == shown else [percent / 100 for percent in box]
                 library.save_source(passage_id, source, region if has_region else None, normalized)
                 if approved:
                     library.approve_source(passage_id, reviewer)
-                flash("Sanskrit approved." if approved else "Sanskrit saved.")
+                flash(f"{source_label} approved." if approved else f"{source_label} saved.")
             except ValueError as error:
                 flash(str(error), "warning")
 
@@ -284,29 +287,40 @@ def source_editor(library, passage, leaf, reviewer):
 def translation_editors(library, live, passage, reviewer, is_live, leaf):
     passage_id = passage["id"]
     flag = leaf["flag"]
-    needs_devanagari = leaf["script"].strip().casefold() != "devanagari" and not passage["normalized"].strip()
+    language = leaf["language"]
+    needs_devanagari = language == "Sanskrit" and leaf["script"].strip().casefold() not in {"unknown", "devanagari"} and not passage["normalized"].strip()
+    can_generate = is_live or local_demo.available()
     if st.button(
         "Generate translation drafts",
         key=f"translate_{passage_id}", width="stretch",
-        disabled=not (is_live and leaf["language"] == "Sanskrit" and passage["source_approved"]
+        disabled=not (can_generate and language in LANGUAGES and passage["source_approved"]
                       and not flag and not needs_devanagari)
-        or bool(passage["english_approved"] and passage["hindi_approved"]),
-        help="Replace the English and Hindi drafts that still need review.",
+        or bool(passage["english_visible"] and passage["hindi_visible"]),
+        help="Check each draft against the approved reading. Live translation and verification use Sarvam credits.",
     ):
         try:
-            with st.spinner("Preparing translation drafts…"):
+            withheld = []
+            with st.spinner("Checking translation drafts…"):
                 for lang, code in TARGETS.items():
                     field = lang.lower()
-                    if not passage[f"{field}_approved"]:
-                        draft = live.translate(passage["normalized"] or passage["source"], code)
+                    if not passage[f"{field}_visible"]:
+                        try:
+                            draft = checked_translation(live if is_live else local_demo,
+                                                        passage["normalized"] or passage["source"],
+                                                        language, lang, code, LANGUAGES[language])
+                        except Withheld:
+                            withheld.append(lang)
+                            continue
                         library.save_translation(
-                            passage_id, code, draft, source_version=passage["source_version"],
+                            passage_id, code, draft, source_version=passage["source_version"], checked=True,
                         )
-                        st.session_state.pop(f"draft_{passage_id}_{code}", None)
-            flash("Translation drafts are ready for review.")
+
+            if withheld:
+                flash(f"Could not verify {' and '.join(withheld)}. Check the source or enter a translation.", "warning")
+            flash("Checked translations are ready for review.")
         except Exception as error:
             flash(str(error), "warning")
-    if is_live and needs_devanagari:
+    if needs_devanagari:
         st.caption("Save a reviewed Devanagari reading before translation.")
 
     for lang, code in TARGETS.items():
@@ -317,9 +331,10 @@ def translation_editors(library, live, passage, reviewer, is_live, leaf):
                 st.markdown(f"### {lang}")
             with status:
                 approved = passage[f"{field}_approved"] and not flag
-                badge("Approved" if approved else "Draft", "good" if approved else "neutral")
+                state = "Approved" if approved else ("Draft" if passage[field] else "Withheld")
+                badge(state, "good" if approved else "neutral")
             with st.form(f"translation_{passage_id}_{code}"):
-                edit_key = f"draft_{passage_id}_{code}"
+                edit_key = f"draft_{passage_id}_{code}_{passage['source_version']}_{passage[field + '_origin']}"
                 draft = st.text_area(f"{lang} translation", value=passage[field], height=106,
                                      label_visibility="collapsed", key=edit_key)
                 save, approve = st.columns(2)
@@ -330,7 +345,7 @@ def translation_editors(library, live, passage, reviewer, is_live, leaf):
                 )
             if saved or signed:
                 try:
-                    library.save_translation(passage_id, code, draft)
+                    library.save_translation(passage_id, code, draft, source_version=passage["source_version"])
                     if signed:
                         library.approve_translation(passage_id, code, reviewer)
                     flash(f"{lang} approved." if signed else f"{lang} saved.")
@@ -370,7 +385,7 @@ def review_notes(library, live, passage, is_live):
             except Exception as error:
                 st.warning(str(error))
         check = st.session_state.get(check_key)
-        if check and check[0] == draft_pair:
+        if has_drafts and check and check[0] == draft_pair:
             show_text(check[1], "en")
 
 
@@ -384,10 +399,10 @@ def reader(library, live, leaf, passage, passages, is_live):
     with st.container(key="reader_panel"):
         label("Approved text")
         if passage["source_approved"]:
-            st.markdown("### Sanskrit")
-            show_text(passage["source"], "sa")
+            st.markdown(f"### {leaf['language']}")
+            show_text(passage["source"], "")
         else:
-            st.info("This passage needs Sanskrit review.")
+            st.info("This passage needs source review.")
         for lang, code in TARGETS.items():
             field = lang.lower()
             if passage["source_approved"] and passage[f"{field}_approved"]:
@@ -430,7 +445,7 @@ def reader(library, live, leaf, passage, passages, is_live):
                 key=f"export_{leaf['id']}",
             )
         else:
-            st.caption("Approve Sanskrit, English, and Hindi to export a passage.")
+            st.caption("Approve the source, English, and Hindi to export a passage.")
 
 
 @st.cache_resource

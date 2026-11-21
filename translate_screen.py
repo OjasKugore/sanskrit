@@ -4,12 +4,12 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from time import monotonic, sleep
-import textwrap
 
 from PIL import Image, ImageOps
 import streamlit as st
 
 import local_demo
+from quality import LANGUAGES, Withheld, checked_translation, compact, uses_script
 from samples import PRACTICE_TITLE
 from sarvam_live import LiveError, PENDING
 
@@ -18,11 +18,6 @@ paste_image = st.components.v2.component(
     html='<div role="status" tabindex="0" style="font:16px system-ui;color:#45524c">Paste an image with ⌘V or Ctrl+V.</div>',
     js=Path(__file__).with_name("paste.js").read_text(),
 )
-
-
-LANGUAGES = {"Sanskrit": "sa-IN", "Hindi": "hi-IN", "English": "en-IN", "Tamil": "ta-IN",
-             "Telugu": "te-IN", "Kannada": "kn-IN", "Malayalam": "ml-IN", "Bengali": "bn-IN",
-             "Marathi": "mr-IN", "Gujarati": "gu-IN", "Punjabi": "pa-IN"}
 
 
 def prepare(raw):
@@ -41,33 +36,81 @@ def prepare(raw):
         return out.getvalue()
 
 
-def run_pipeline(lib, live, leaf, report):
-    raw = prepare(leaf["original"])
-    report("Reading the image with Sarvam Vision…")
-    source_code = LANGUAGES[leaf["language"]]
+def read_blocks(live, leaf, raw):
     deadline = monotonic() + 75
     while True:
         try:
-            blocks = live.ocr(raw, leaf["filename"], source_code)
-            break
+            return live.ocr(raw, leaf["filename"], LANGUAGES[leaf["language"]])
         except LiveError as error:
             if str(error) != PENDING or monotonic() >= deadline:
                 raise
             sleep(3)
-    lib.ingest(leaf["id"], blocks)
-    for row in lib.passages(leaf["id"]):
-        source = row["normalized"] or row["source"]
-        if not source.strip():
+
+
+def check_unreviewed_reading(live, leaf, raw, rows, report):
+    if leaf["kind"] != "Printed text":
+        raise Withheld("Check the manuscript reading against the leaf in Review before translation.")
+    if any(row["source_version"] != 1 or row["source"] != row["raw_ocr"] or row["normalized"]
+           for row in rows):
+        raise Withheld("An edited source needs approval in Review.")
+    if live and not local_demo.available():
+        raise Withheld("OCR is ready. Compare the source with the image in Review before translation.")
+    report("Checking the printed text against the image…")
+    reading = local_demo.read_image(raw, leaf["language"], printed=True, double_check=True)
+    if (not uses_script(reading, leaf["language"]) or "[gap]" in reading
+            or compact(reading) != compact(" ".join(row["source"] for row in rows))):
+        raise Withheld(local_demo.READING_HELP)
+
+
+def run_pipeline(lib, live, leaf, report):
+    if leaf["flag"]:
+        raise Withheld("A clearer image was requested. Resolve the image issue in Review.")
+    language = leaf["language"]
+    raw = prepare(leaf["original"])
+    rows = lib.passages(leaf["id"])
+    printed = leaf["kind"] == "Printed text"
+    if not rows:
+        report("Reading the image…")
+        if live:
+            blocks = read_blocks(live, leaf, raw)
+        else:
+            blocks = [{"text": local_demo.read_image(raw, language, printed=printed)}]
+        lib.ingest(leaf["id"], blocks)
+        rows = lib.passages(leaf["id"])
+    pending = [row for row in rows if not all(row[k + "_visible"] for k in ("english", "hindi"))]
+    if not pending:
+        return
+    source_issue = ""
+    if any(not row["source_approved"] for row in pending):
+        try:
+            check_unreviewed_reading(live, leaf, raw, rows, report)
+        except Withheld as error:
+            source_issue = str(error)
+    provider = live or local_demo
+    withheld = False
+    for row in pending:
+        if source_issue and not row["source_approved"]:
             continue
-        for name, code in (("English", "en-IN"), ("Hindi", "hi-IN")):
-            if row[name.lower()].strip():
+        if (language == "Sanskrit" and leaf["script"].strip().casefold() not in {"unknown", "devanagari"}
+                and not row["normalized"]):
+            withheld = True
+            continue
+        source = row["normalized"] or row["source"]
+        for target, code in (("English", "en-IN"), ("Hindi", "hi-IN")):
+            field = target.lower()
+            if row[field + "_visible"] or row[field]:
                 continue
-            report(f"Translating into {name}…")
-            chunks = textwrap.wrap(source, width=1990, replace_whitespace=False)
-            draft = source if code == source_code else " ".join(
-                live.translate(chunk, code, source_code) for chunk in chunks
-            )
-            lib.save_translation(row["id"], code, draft, source_version=row["source_version"])
+            report(f"Checking the {target} translation…")
+            try:
+                draft = checked_translation(provider, source, language, target, code, LANGUAGES[language])
+            except Withheld:
+                withheld = True
+                continue
+            lib.save_translation(row["id"], code, draft, source_version=row["source_version"], checked=True)
+    if source_issue:
+        raise Withheld(source_issue)
+    if withheld:
+        raise Withheld("A translation could not be verified. Open Review to check the passage.")
 
 
 def translate_screen(lib, live, enabled):
@@ -75,6 +118,8 @@ def translate_screen(lib, live, enabled):
     st.write("Paste a manuscript or document to read it in English and Hindi.")
     with st.container(border=True, key="import_surface"):
         input_lang = st.selectbox("Language in the image", list(LANGUAGES))
+        kind = st.radio("Image type", ["Manuscript", "Printed text"], horizontal=True,
+                        help="Manuscripts need a reviewed source reading before translation.")
         event = paste_image(key="clipboard", on_image_change=lambda: None)
         upload = st.file_uploader("Or drop a file here", type=["jpg","jpeg","png","webp","bmp","tif","tiff","gif"])
         candidate = None
@@ -90,11 +135,11 @@ def translate_screen(lib, live, enabled):
             name, original = candidate
             try:
                 prepare(original)
-                digest = (input_lang, sha256(original).hexdigest())
+                digest = (input_lang, kind, sha256(original).hexdigest())
                 known = st.session_state.setdefault("import_ids", {})
                 if digest not in known:
                     known[digest] = lib.add_leaf(Path(name).stem or "Pasted image", original,
-                                                 name, language=input_lang)
+                                                 name, language=input_lang, kind=kind)
                 st.session_state["translation_leaf"] = known[digest]
                 st.session_state["show_sample"] = False
             except (OSError, ValueError, Image.DecompressionBombError) as error:
@@ -116,40 +161,39 @@ def translate_screen(lib, live, enabled):
     left, right = st.columns([1,1.12], gap="large")
     with left:
         st.subheader(leaf["title"])
+        st.caption(f"{leaf['kind']} · {leaf['language']}")
         st.image(prepare(leaf["original"]), width="stretch")
-        if leaf["language"] == "Sanskrit" and st.button("Review passages"):
+        if st.button("Review passages"):
             st.session_state.update(next_page="Review", new_leaf=leaf_id)
             st.rerun()
     with right:
-        st.subheader("Translation drafts")
+        st.subheader("Translations")
         sample_mode = st.session_state.get("show_sample", False)
         if sample_mode:
             st.caption("Saved example · Modern typeset Sanskrit")
-        elif input_lang != leaf["language"] and lib.passages(leaf_id):
-            st.info(f"This image was processed as {leaf['language']}. To use another language, paste the image again.")
+        elif input_lang != leaf["language"] or kind != leaf["kind"]:
+            st.info(f"This image is saved as {leaf['kind']} in {leaf['language']}. Paste the image again to change its settings.")
+        elif leaf["flag"]:
+            st.warning(f"A clearer image is needed. {leaf['flag']}")
         elif st.button("Translate into English and Hindi", type="primary", disabled=not (enabled or local_ready)):
             with st.status("Reading the image…", expanded=True) as progress:
                 try:
-                    if leaf["language"] != input_lang:
-                        lib.update_leaf(leaf_id, leaf["title"], leaf["catalogue"], input_lang, leaf["script"], leaf["source_url"])
-                        leaf = lib.leaf(leaf_id)
-                    if enabled:
-                        run_pipeline(lib, live, leaf, lambda message: progress.update(label=message))
-                    elif not lib.passages(leaf_id):
-                        progress.update(label="Reading and translating on this Mac…")
-                        lib.save_local_draft(leaf_id, *local_demo.read_image(prepare(leaf["original"]), input_lang))
-                    elif not all(row["english"] and row["hindi"] for row in lib.passages(leaf_id)):
-                        raise ValueError("This image already has passages under review. Resume in Review.")
-                    progress.update(label="Drafts ready for review.", state="complete")
+                    run_pipeline(lib, live if enabled else None, leaf, lambda msg: progress.update(label=msg))
+                    progress.update(label="Check complete.", state="complete")
                 except (LiveError, ValueError) as error:
                     progress.update(label="Processing stopped.", state="error")
                     st.warning(str(error))
         rows = lib.passages(leaf_id)
-        if rows:
-            if any(row.get("import_key") == "local-vision" for row in rows):
-                st.caption("Machine draft · Qwen2.5-VL on this Mac")
-            for name in ("English", "Hindi"):
-                st.markdown(f"**{name}**")
-                st.text("\n\n".join(row[name.lower()] or "Awaiting translation." for row in rows))
-            with st.expander(f"Recognized text · {leaf['language']}"):
-                st.text("\n".join(row["source"] for row in rows))
+        if rows and not leaf["flag"]:
+            for number, row in enumerate(rows, 1):
+                if len(rows) > 1:
+                    st.markdown(f"**Passage {number}**")
+                for target in ("English", "Hindi"):
+                    field = target.lower()
+                    if row[field + "_visible"]:
+                        status = ("Approved" if row[field + "_approved"] else "Reference translation"
+                                  if row[field + "_origin"] == "reference" else "Machine-checked draft")
+                        st.caption(f"{target} · {status}")
+                        st.text(row[field])
+                    else:
+                        st.caption(f"{target} withheld. Review the passage against the image.")
