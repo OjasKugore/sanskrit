@@ -1,0 +1,183 @@
+:root {
+  --paper: #f5f2eb;
+  --card: #fbf9f4;
+  --ink: #302723;
+  --muted: #61524a;
+  --accent: #a54937;
+  --border: #e2d9cd;
+  --deep: #25211e;
+}
+.stApp { background: var(--paper); color: var(--ink); }
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stAppDeployButton"] { display: none; }
+.stMainBlockContainer {
+  max-width: 1500px;
+  padding: 3.1rem clamp(1.1rem, 4vw, 3.75rem) 4rem;
+}
+[data-testid="stSidebar"] {
+  background: #29221e;
+  border-right: 1px solid #3c312b;
+  color: #fbf1e6;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding: 2.15rem 1.15rem; }
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: #f1e6d9; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+  color: #d1c0b0;
+  line-height: 1.55;
+}
+[data-testid="stSidebar"] .stAlert p { color: #382824; }
+[data-testid="stSidebar"] summary {
+  color: #f6e8d9;
+  background: #342b25;
+  border-color: #4b3e36;
+}
+[data-testid="stSidebar"] summary p { color: #f6e8d9; }
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+  margin: 0;
+  padding: .65rem .65rem;
+  border-radius: 6px;
+  color: #24382d;
+  align-items: center;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
+  background: #49372d;
+  box-shadow: inset 2px 0 #d48162;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label p {
+  color: inherit;
+  font-size: .92rem;
+}
+.brand { display: flex; align-items: center; gap: .75rem; padding: .15rem 0 1.25rem; }
+.brand-seal {
+  display: grid;
+  place-items: center;
+  width: 2.65rem;
+  height: 2.65rem;
+  background: #a64e37;
+  color: #ffe5c4;
+  border: 1px solid #cd795c;
+  border-radius: 9px;
+  font-size: 1.45rem;
+}
+.brand strong {
+  display: block;
+  font: 600 1.6rem/1.05 Georgia, serif;
+  color: #fff0dd;
+}
+.brand small { color: #d6c0ab; font-size: .8rem; }
+.sidebar-rule { height: 1px; margin: .65rem 0 0; background: #4c3d34; }
+.sidebar-link { color: #e4ad92 !important; font-size: .86rem; }
+.field-label {
+  color: #7d4033;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+[data-testid="stSidebar"] .field-label { color: #cdbbaa; }
+.st-key-title_band {
+  padding: 0 0 1.3rem;
+  margin-bottom: .5rem;
+  border-bottom: 1px solid #dbd2c6;
+}
+.st-key-title_band h1 {
+  font: 500 clamp(2.5rem, 4.7vw, 4.3rem)/1.04 Georgia, serif;
+  letter-spacing: -.055em;
+  padding: 0 0 .3rem;
+}
+.st-key-title_band [data-testid="stCaptionContainer"] p {
+  font-size: .93rem;
+  color: var(--muted);
+}
+.badge {
+  display: inline-flex;
+  gap: .43rem;
+  align-items: center;
+  color: #733f2b;
+  background: #f0e4d7;
+  border: 1px solid #e7d6c7;
+  border-radius: 999px;
+  padding: .2rem .67rem;
+  min-height: 1.75rem;
+  font-size: .78rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.badge span { width: .375rem; height: .375rem; border-radius: 50%; background: currentColor; }
+.badge.good { color: #315b44; background: #e4eee4; border-color: #cfdfd1; }
+[data-testid="stSidebar"] .badge { color: #ffd8bf; background: #473026; border-color: #624636; }
+[data-testid="stSidebar"] .badge.good { color: #d9edca; background: #334231; border-color: #58614e; }
+.st-key-image_panel, .st-key-leaf_tools, .st-key-source_editor,
+.st-key-target_english, .st-key-target_hindi, .st-key-reader_panel {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.st-key-image_panel {
+  background: #332b25;
+  color: #f6e9d8;
+  border-color: #443831;
+  padding: 1.06rem;
+  box-shadow: 0 8px 21px #2c201718;
+}
+.st-key-image_panel h3, .st-key-image_panel [data-testid="stCaptionContainer"] p { color: #f7e8d6; }
+.st-key-image_panel .field-label { color: #d9a48b; }
+.st-key-image_panel button {
+  background: #493b30;
+  color: #fff0dd;
+  border-color: #5b493c;
+}
+.st-key-image_panel button[aria-checked="true"] {
+  color: #fff2e6 !important;
+  background: #804734 !important;
+  border-color: #c28262 !important;
+}
+.st-key-image_panel button:disabled { opacity: .64; }
+.st-key-image_stage {
+  min-height: clamp(190px, 23vw, 385px);
+  justify-content: center;
+  padding: clamp(.5rem, 1.75vw, 1.4rem);
+  background: #241e19;
+  border: 1px solid #4c3c2e;
+  border-radius: 8px;
+}
+.st-key-image_stage img { border-radius: 3px; box-shadow: 0 8px 21px #0d090788; }
+.st-key-passage_selector .field-label { margin-bottom: -.46rem; }
+.st-key-order_controls { margin-top: -.2rem; }
+.stApp h3 {
+  font: 600 1.4rem/1.18 Georgia, serif;
+  margin: 0;
+  padding: 0;
+}
+.stApp textarea, .reading-text {
+  font-size: 1.08rem;
+  line-height: 1.55;
+}
+.stApp textarea { background: #f1ece3; }
+.reading-text {
+  padding: .2rem 0 .65rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-testid="stDownloadButton"] button { min-height: 2.45rem; }
+.stApp [data-testid="stExpander"] details { border-radius: 7px; }
+@media (max-width: 740px) {
+  .stMainBlockContainer { padding-top: 3rem; }
+  .st-key-title_band h1 { font-size: 2.7rem; }
+  .st-key-image_stage { min-height: 170px; }
+}
+
+/* Keep navigation quiet so the image remains the focus. */
+[data-testid="stSidebar"] {background:#ebede8; border-right:1px solid #d3d8d0;color:#24382d}
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding:1.3rem}
+[data-testid="stSidebar"] .brand strong {font:600 1.55rem Georgia,serif;color:#203e30}
+[data-testid="stSidebar"] .brand small {color:#4c5c51}
+[data-testid="stSidebar"] .brand-seal {background:#294d39;border:0;border-radius:4px;color:white}
+[data-testid="stSidebar"] .stMarkdown p,[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {color:#35473b}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {background:#dae2d7;box-shadow:inset 2px 0 #31583f}
+.st-key-import_surface {padding:1.5rem;background:#fff;border-color:#d6dcd5}
+.stMainBlockContainer {max-width:1360px}

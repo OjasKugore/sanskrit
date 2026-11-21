@@ -1,0 +1,3 @@
+streamlit==1.67.0
+sarvamai==0.1.48
+Pillow>=11,<14
