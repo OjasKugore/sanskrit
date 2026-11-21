@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image
 
-from quality import LANGUAGES, plausible
+from quality import LANGUAGES as _LANGUAGE_CODES, plausible
 
 
 SCHEMA = """
@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS passages (
 );
 CREATE INDEX IF NOT EXISTS passage_order ON passages(leaf_id, position);
 """
-LANGUAGES = {
+# Maps normalised lang tags to the internal field name used in the passages table.
+_LANG_FIELD = {
     "en": "english", "en-in": "english", "english": "english",
     "hi": "hindi", "hi-in": "hindi", "hindi": "hindi",
 }
@@ -58,7 +59,7 @@ LANGUAGES = {
 
 def _language(lang):
     try:
-        return LANGUAGES[lang.lower()]
+        return _LANG_FIELD[lang.lower()]
     except (KeyError, AttributeError):
         raise ValueError("Choose English or Hindi.") from None
 
@@ -328,7 +329,7 @@ def _edition(leaf, passages):
     if scheme in ("http", "https"):
         metadata += f' · <a href="{escape(link, quote=True)}">Collection record</a>'
     source_label = escape(leaf["language"])
-    source_code = LANGUAGES.get(leaf["language"], "und").split("-")[0]
+    source_code = _LANGUAGE_CODES.get(leaf["language"], "und").split("-")[0]
     blocks = []
     for row in passages:
         pid = int(row["id"])
