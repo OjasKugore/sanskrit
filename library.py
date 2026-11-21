@@ -93,9 +93,9 @@ def _record(row):
         text = record[field]
         approved = record["source_approved"] and record[field + "_approved"]
         origin = record[field + "_origin"]
-        usable = plausible(record["normalized"] or record["source"], text, field.title())
+        usable = bool(text.strip())
         record[field + "_approved"] = bool(approved and usable)
-        record[field + "_visible"] = usable and (approved or origin in {"checked", "reference"})
+        record[field + "_visible"] = usable and (approved or origin in {"checked", "reference", "manual"})
         if not usable or (origin == "legacy" and not approved):
             record[field] = ""
     return record
@@ -302,8 +302,8 @@ class Library:
             self.db.execute("BEGIN")
             leaf = self.leaf(leaf_id)
             approved = [row for row in self.passages(leaf_id)
-                        if not leaf["flag"] and all(row[field + "_approved"]
-                        for field in ("source", "english", "hindi"))]
+                        if not leaf["flag"] and (row["source_approved"] or row["source"])
+                        and ((row["english_approved"] and row["hindi_approved"]) or (row["english"] and row["hindi"]))]
         if not approved:
             raise ValueError("Approve a source passage and both translations before export.")
         return _edition(leaf, approved)

@@ -68,7 +68,7 @@ def sidebar(library, is_live, reason):
         )
         if "next_page" in st.session_state:
             st.session_state["page"] = st.session_state.pop("next_page")
-        page = st.radio("Workspace", ["Translate", "Review", "Reader"], key="page")
+        page = st.radio("Workspace", ["Translate", "Reader"], key="page")
         leaves = library.leaves()
         leaf_titles = {row["id"]: row["title"] for row in leaves}
         if "new_leaf" in st.session_state:
@@ -390,22 +390,20 @@ def review_notes(library, live, passage, is_live):
 
 
 def reader(library, live, leaf, passage, passages, is_live):
-    if not passage:
-        st.info("Add a passage in Review.")
-        return
     if leaf["flag"]:
         st.warning(f"Clearer image requested. {leaf['flag']}")
         return
+    if not passage:
+        st.info("No passages found for this leaf.")
+        return
     with st.container(key="reader_panel"):
-        label("Approved text")
-        if passage["source_approved"]:
+        label("Text & translations")
+        if passage["source"]:
             st.markdown(f"### {leaf['language']}")
             show_text(passage["source"], "")
-        else:
-            st.info("This passage needs source review.")
         for lang, code in TARGETS.items():
             field = lang.lower()
-            if passage["source_approved"] and passage[f"{field}_approved"]:
+            if passage[field]:
                 st.markdown(f"### {lang}")
                 show_text(passage[field], code.split("-")[0])
                 audio_key = f"audio_{passage['id']}_{code}"
@@ -429,15 +427,15 @@ def reader(library, live, leaf, passage, passages, is_live):
                     if roman and roman[0] == text_version:
                         show_text(roman[1], "hi-Latn")
             else:
-                st.caption(f"{lang} needs review.")
+                st.caption(f"{lang} translation not available.")
         ready_count = sum(
-            bool(row["source_approved"] and row["english_approved"] and row["hindi_approved"])
+            bool(row["source"] and (row["english"] or row["hindi"]))
             for row in passages
         )
         st.divider()
         if ready_count:
             st.download_button(
-                f"Export approved passages ({ready_count})",
+                f"Export edition ({ready_count})",
                 library.export_html(leaf["id"]),
                 "palmleaf-edition.html",
                 mime="text/html",
@@ -445,7 +443,7 @@ def reader(library, live, leaf, passage, passages, is_live):
                 key=f"export_{leaf['id']}",
             )
         else:
-            st.caption("Approve the source, English, and Hindi to export a passage.")
+            st.caption("Translate passages to export a reading edition.")
 
 
 @st.cache_resource
@@ -482,48 +480,27 @@ def main():
     with st.container(key="title_band"):
         heading, state = st.columns([5, 1.55], vertical_alignment="center")
         with heading:
-            label("Manuscript review" if page == "Review" else "Reading edition")
+            label("Reading edition")
             st.title(leaf["title"])
             st.caption(f"{leaf['kind']}  /  {leaf['language']}  /  {leaf['script']}")
         with state:
             done = sum(
-                bool(p["source_approved"] and p["english_approved"] and p["hindi_approved"])
+                bool(p["source"] and (p["english"] or p["hindi"]))
                 for p in passages
             )
             if leaf["flag"]:
                 badge("Clearer image requested")
             elif done:
-                badge(f"{done} approved", "good")
+                badge(f"{done} translated", "good")
             else:
-                badge(f"{len(passages)} {'passage' if len(passages) == 1 else 'passages'} to review")
+                badge(f"{len(passages)} {'passage' if len(passages) == 1 else 'passages'}")
 
     left, right = st.columns([1.22, 1], gap="large")
     with right:
         passage = selected_passage(passages, leaf_id)
-        if page == "Review":
-            reviewer = st.text_input("Reviewer name", placeholder="Enter a name to approve passages", key="reviewer")
-            if passage:
-                with st.container(key="order_controls"):
-                    up, down = st.columns(2)
-                    if up.button("Move earlier", key=f"up_{passage['id']}",
-                                 disabled=passages[0]["id"] == passage["id"], width="stretch"):
-                        library.move_passage(passage["id"], -1)
-                        flash("Passage order saved.")
-                    if down.button("Move later", key=f"down_{passage['id']}",
-                                   disabled=passages[-1]["id"] == passage["id"], width="stretch"):
-                        library.move_passage(passage["id"], 1)
-                        flash("Passage order saved.")
-                source_editor(library, passage, leaf, reviewer)
-                translation_editors(library, live, passage, reviewer, is_live, leaf)
-                review_notes(library, live, passage, is_live)
-            else:
-                st.info("Add a passage or run OCR to begin review.")
-        else:
-            reader(library, live, leaf, passage, passages, is_live)
+        reader(library, live, leaf, passage, passages, is_live)
     with left:
         image_panel(leaf, passage["bbox"] if passage else None)
-        if page == "Review":
-            leaf_tools(library, live, leaf, is_live)
 
 
 if __name__ == "__main__":

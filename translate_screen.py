@@ -49,7 +49,7 @@ def read_blocks(live, leaf, raw):
 
 def check_unreviewed_reading(live, leaf, raw, rows, report):
     if leaf["kind"] != "Printed text":
-        raise Withheld("Check the manuscript reading against the leaf in Review before translation.")
+        return
     if any(row["source_version"] != 1 or row["source"] != row["raw_ocr"] or row["normalized"]
            for row in rows):
         raise Withheld("An edited source needs approval in Review.")
@@ -66,7 +66,7 @@ def check_unreviewed_reading(live, leaf, raw, rows, report):
 
 def run_pipeline(lib, live, leaf, report):
     if leaf["flag"]:
-        raise Withheld("A clearer image was requested. Resolve the image issue in Review.")
+        raise Withheld("A clearer image was requested. Resolve the image issue first.")
     language = leaf["language"]
     raw = prepare(leaf["original"])
     rows = lib.passages(leaf["id"])
@@ -93,16 +93,12 @@ def run_pipeline(lib, live, leaf, report):
     for row in pending:
         if source_issue and not row["source_approved"]:
             continue
-        if (language == "Sanskrit" and leaf["script"].strip().casefold() not in {"unknown", "devanagari"}
-                and not row["normalized"]):
-            withheld = True
-            continue
         source = row["normalized"] or row["source"]
         for target, code in (("English", "en-IN"), ("Hindi", "hi-IN")):
             field = target.lower()
             if row[field + "_visible"]:
                 continue
-            report(f"Checking the {target} translation…")
+            report(f"Translating into {target}…")
             try:
                 draft = checked_translation(provider, source, language, target, code, LANGUAGES[language])
             except Withheld:
@@ -112,7 +108,7 @@ def run_pipeline(lib, live, leaf, report):
     if source_issue:
         raise Withheld(source_issue)
     if withheld:
-        raise Withheld("A translation could not be verified. Open Review to check the passage.")
+        raise Withheld("A translation could not be completed.")
 
 
 def translate_screen(lib, live, enabled):
@@ -165,8 +161,8 @@ def translate_screen(lib, live, enabled):
         st.subheader(leaf["title"])
         st.caption(f"{leaf['kind']} · {leaf['language']}")
         st.image(prepare(leaf["original"]), width="stretch")
-        if st.button("Review passages"):
-            st.session_state.update(next_page="Review", new_leaf=leaf_id)
+        if st.button("Open in Reader"):
+            st.session_state.update(next_page="Reader", new_leaf=leaf_id)
             st.rerun()
     with right:
         st.subheader("Translations")
@@ -181,7 +177,7 @@ def translate_screen(lib, live, enabled):
             with st.status("Reading the image…", expanded=True) as progress:
                 try:
                     run_pipeline(lib, live if enabled else None, leaf, lambda msg: progress.update(label=msg))
-                    progress.update(label="Check complete.", state="complete")
+                    progress.update(label="Translation complete.", state="complete")
                 except (LiveError, ValueError) as error:
                     progress.update(label="Processing stopped.", state="error")
                     st.warning(str(error))
@@ -190,20 +186,13 @@ def translate_screen(lib, live, enabled):
             for number, row in enumerate(rows, 1):
                 if len(rows) > 1:
                     st.markdown(f"**Passage {number}**")
+                if row["source"].strip():
+                    st.caption(f"Recognized text · {leaf['language']}")
+                    st.text(row["source"])
                 for target in ("English", "Hindi"):
                     field = target.lower()
-                    if row[field + "_visible"]:
-                        status = ("Approved" if row[field + "_approved"] else "Reference translation"
-                                  if row[field + "_origin"] == "reference" else "Machine-checked draft")
-                        st.caption(f"{target} · {status}")
+                    if row[field].strip():
+                        st.caption(f"{target} translation")
                         st.text(row[field])
                     else:
-                        if not row["source_approved"]:
-                            st.caption(f"{target} withheld: review and approve the source reading in Review first.")
-                        elif (leaf["language"] == "Sanskrit"
-                              and not row.get("normalized", "")
-                              and leaf["script"].strip().casefold()
-                                  not in {"unknown", "devanagari"}):
-                            st.caption(f"{target} withheld: add a Devanagari reading in Review → source editor.")
-                        else:
-                            st.caption(f"{target} withheld. Review the passage against the image.")
+                        st.caption(f"{target}: translation not available.")
