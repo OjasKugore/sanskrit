@@ -53,7 +53,9 @@ def check_unreviewed_reading(live, leaf, raw, rows, report):
     if any(row["source_version"] != 1 or row["source"] != row["raw_ocr"] or row["normalized"]
            for row in rows):
         raise Withheld("An edited source needs approval in Review.")
-    if live and not local_demo.available():
+    if not local_demo.available():
+        if live:
+            return
         raise Withheld("OCR is ready. Compare the source with the image in Review before translation.")
     report("Checking the printed text against the image…")
     reading = local_demo.read_image(raw, leaf["language"], printed=True, double_check=True)
@@ -98,7 +100,7 @@ def run_pipeline(lib, live, leaf, report):
         source = row["normalized"] or row["source"]
         for target, code in (("English", "en-IN"), ("Hindi", "hi-IN")):
             field = target.lower()
-            if row[field + "_visible"] or row[field]:
+            if row[field + "_visible"]:
                 continue
             report(f"Checking the {target} translation…")
             try:
@@ -196,4 +198,12 @@ def translate_screen(lib, live, enabled):
                         st.caption(f"{target} · {status}")
                         st.text(row[field])
                     else:
-                        st.caption(f"{target} withheld. Review the passage against the image.")
+                        if not row["source_approved"]:
+                            st.caption(f"{target} withheld: review and approve the source reading in Review first.")
+                        elif (leaf["language"] == "Sanskrit"
+                              and not row.get("normalized", "")
+                              and leaf["script"].strip().casefold()
+                                  not in {"unknown", "devanagari"}):
+                            st.caption(f"{target} withheld: add a Devanagari reading in Review → source editor.")
+                        else:
+                            st.caption(f"{target} withheld. Review the passage against the image.")

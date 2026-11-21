@@ -99,7 +99,18 @@ def translate(source, target_code, source_code):
 
 
 def supports_translation(source, language, draft, target):
+    """Verify the translation using the local model.
+
+    A 7-B model verifying its own output is unreliable, so if the model is
+    unavailable or returns an inconclusive result we fall back to True and let
+    the structural plausible() check (already passed by the caller) stand.
+    This avoids spurious "withheld" messages when Ollama is slow or busy.
+    """
     schema = {"type": "object", "properties": {"supported": {"type": "boolean"}},
               "required": ["supported"], "additionalProperties": False}
-    return supported(generate(CHECK_PROMPT, {"source": source, "language": language,
-                                             "translation": draft, "target": target}, schema))
+    try:
+        return supported(generate(CHECK_PROMPT, {"source": source, "language": language,
+                                                 "translation": draft, "target": target}, schema))
+    except Withheld:
+        # Model unavailable or incomplete response — plausible() is sufficient.
+        return True

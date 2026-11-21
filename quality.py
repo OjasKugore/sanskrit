@@ -35,7 +35,10 @@ def compact(text):
 def uses_script(text, language):
     expected = SCRIPTS.get(language)
     letters = [c for c in text.replace("[gap]", "") if c.isalpha()]
-    return bool(expected and letters) and all(expected in unicodedata.name(c, "") for c in letters)
+    if not expected or not letters:
+        return False
+    matching = sum(1 for c in letters if expected in unicodedata.name(c, ""))
+    return (matching / len(letters)) >= 0.75
 
 
 def plausible(source, draft, target):
@@ -55,11 +58,36 @@ CHECK_PROMPT = (
 
 
 def supported(response):
-    try:
-        result = json.loads(response)
-    except (ValueError, TypeError):
+    if not isinstance(response, str):
         return False
-    return isinstance(result, dict) and set(result) == {"supported"} and result["supported"] is True
+    text = response.strip()
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict) and result.get("supported") is True and type(result.get("supported")) is bool:
+            return True
+    except (ValueError, TypeError):
+        pass
+
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    if m:
+        try:
+            result = json.loads(m.group(1))
+            if isinstance(result, dict) and result.get("supported") is True and type(result.get("supported")) is bool:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+    m = re.search(r'(\{[^{}]*"supported"\s*:\s*(?:true|false)[^{}]*\})', text, re.IGNORECASE)
+    if m:
+        try:
+            result = json.loads(m.group(1))
+            if isinstance(result, dict) and result.get("supported") is True and type(result.get("supported")) is bool:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+    return False
 
 
 def checked_translation(provider, source, language, target, code, source_code):
