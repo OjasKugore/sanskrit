@@ -9,7 +9,15 @@ from PIL import Image, ImageOps
 import streamlit as st
 
 import local_demo
-from quality import LANGUAGES, Withheld, checked_translation, compact, uses_script
+from quality import (
+    LANGUAGES,
+    COMMENTARY,
+    Withheld,
+    checked_translation,
+    compact,
+    detect_language_code,
+    uses_script,
+)
 from samples import PRACTICE_TITLE
 from sarvam_live import LiveError, PENDING
 
@@ -94,13 +102,14 @@ def run_pipeline(lib, live, leaf, report):
         if source_issue and not row["source_approved"]:
             continue
         source = row["normalized"] or row["source"]
+        src_code = detect_language_code(source, LANGUAGES.get(language, "sa-IN"))
         for target, code in (("English", "en-IN"), ("Hindi", "hi-IN")):
             field = target.lower()
             if row[field + "_visible"]:
                 continue
             report(f"Translating into {target}…")
             try:
-                draft = checked_translation(provider, source, language, target, code, LANGUAGES[language])
+                draft = checked_translation(provider, source, language, target, code, src_code)
             except Withheld:
                 withheld = True
                 continue

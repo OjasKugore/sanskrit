@@ -32,11 +32,42 @@ def compact(text):
     return " ".join(unicodedata.normalize("NFC", text).split())
 
 
+SCRIPT_TO_CODE = {
+    "TAMIL": "ta-IN",
+    "TELUGU": "te-IN",
+    "KANNADA": "kn-IN",
+    "MALAYALAM": "ml-IN",
+    "BENGALI": "bn-IN",
+    "GUJARATI": "gu-IN",
+    "GURMUKHI": "pa-IN",
+    "DEVANAGARI": "sa-IN",
+    "LATIN": "en-IN",
+}
+
+
+def detect_language_code(text, default="sa-IN"):
+    counts = {}
+    for c in text:
+        if not c.isalpha():
+            continue
+        name = unicodedata.name(c, "")
+        for script_name, lang_code in SCRIPT_TO_CODE.items():
+            if script_name in name:
+                counts[lang_code] = counts.get(lang_code, 0) + 1
+    if counts:
+        return max(counts, key=counts.get)
+    return default
+
+
 def uses_script(text, language):
     expected = SCRIPTS.get(language)
     letters = [c for c in text.replace("[gap]", "") if c.isalpha()]
     if not expected or not letters:
         return False
+    if language == "Sanskrit":
+        valid_scripts = {"DEVANAGARI", "TAMIL", "TELUGU", "MALAYALAM", "KANNADA", "BENGALI", "GRANTHA", "LATIN"}
+        matching = sum(1 for c in letters if any(s in unicodedata.name(c, "") for s in valid_scripts))
+        return (matching / len(letters)) >= 0.75
     matching = sum(1 for c in letters if expected in unicodedata.name(c, ""))
     return (matching / len(letters)) >= 0.75
 
